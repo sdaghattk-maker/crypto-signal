@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>سیگنال کریپتو</title>
+<style>
+:root{--bg:#10151c;--sf:#18202b;--tx:#e8edf3;--mu:#8795a6;--up:#35c28a;--dn:#ef5b5b;--ac:#e0b84c;--ln:#27323f;color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:13px/1.6 Vazirmatn,Tahoma,system-ui,sans-serif;padding:max(14px,env(safe-area-inset-top)) 14px max(20px,env(safe-area-inset-bottom))}
+main{max-width:520px;margin:0 auto}
+h1{font-size:17px;margin:4px 0 14px}
+.row{display:flex;gap:8px;margin-bottom:10px}
+.row label select{width:100%}
+.row label{flex:1;font-size:11px;color:var(--mu)}
+input,select,button{font:inherit;border-radius:10px;border:1px solid var(--ln);background:var(--sf);color:var(--tx);padding:9px 12px;min-width:0;width:100%}
+#sym{text-transform:uppercase;direction:ltr;flex:1}
+select{width:auto}
+#go{background:var(--ac);color:#1a1405;font-weight:700;border:0;width:auto}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+.chips button{width:auto;padding:3px 10px;font-size:12px;color:var(--mu)}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--ac);outline-offset:2px}
+.sig{border-radius:14px;padding:16px;margin-bottom:12px;border:2px solid var(--ln);background:var(--sf)}
+.sig.long{border-color:var(--up)}.sig.short{border-color:var(--dn)}
+.sig b{font-size:18px}.long b{color:var(--up)}.short b{color:var(--dn)}
+.px{color:var(--mu);direction:ltr;display:inline-block}
+.bar{height:6px;background:var(--ln);border-radius:4px;margin-top:8px}
+.bar i{display:block;height:100%;border-radius:4px;background:var(--ac)}
+table{width:100%;border-collapse:collapse;margin-bottom:8px}
+td{padding:5px 4px;border-bottom:1px solid var(--ln)}
+td:last-child{text-align:left;direction:ltr;font-variant-numeric:tabular-nums}
+h2{font-size:13px;color:var(--mu);margin:16px 0 4px;font-weight:600}
+.up{color:var(--up)}.dn{color:var(--dn)}
+canvas{touch-action:pan-y;cursor:grab;width:100%;height:320px;background:var(--sf);border-radius:12px}
+.zb{display:flex;gap:6px;margin:6px 0}.zb button{width:auto;padding:2px 12px;font-size:13px;background:var(--sf);color:var(--tx);border:1px solid var(--ln);font-weight:400}
+ul{padding:0 18px;margin:6px 0;color:var(--mu)}
+.note{font-size:11px;color:var(--mu);margin-top:16px}
+</style>
+</head>
+<body>
+<main>
+<h1>تحلیل SMC / ICT</h1>
+<div class="row">
+  <input id="sym" value="BTCUSDT" aria-label="نماد" autocapitalize="characters" spellcheck="false">
+  <select id="tf" aria-label="تایم‌فریم"><option>1m</option><option>5m</option><option>15m</option><option selected>1h</option><option>4h</option><option>1d</option></select>
+  <button id="go">تحلیل</button>
+</div>
+<div class="chips" id="chips"></div>
+<label style="display:flex;gap:8px;align-items:center;font-size:13px;color:var(--mu);margin-bottom:12px"><input type="checkbox" id="live" style="width:auto"> حالت زنده: قیمت لحظه‌ای و به‌روزرسانی خودکار تحلیل</label>
+<div class="row">
+  <label>سرمایه (USDT)<input id="cap" type="number" inputmode="decimal" min="0"></label>
+  <label>ریسک هر معامله (٪)<input id="rk" type="number" inputmode="decimal" min="0" step="0.1"></label>
+</div>
+<div class="row">
+  <label>تعداد کندل تحلیل<select id="cnt"><option>300</option><option>500</option><option>750</option><option selected>1000</option></select></label>
+  <label>کندل روی نمودار<select id="vis"><option>60</option><option selected>120</option><option>200</option></select></label>
+</div>
+<div id="out"><p style="color:var(--mu)">نماد را بنویس یا یکی از میانبرها را بزن.</p></div>
+<p class="note">این ابزار فقط تحلیل تکنیکال خودکار است و توصیه مالی نیست. نتیجه بک‌تست تضمینی برای آینده نیست. همیشه حد ضرر بگذار و فقط با سرمایه‌ای معامله کن که توان از دست دادنش را داری.</p>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+const HOSTS=["https://api.binance.com","https://data-api.binance.vision"];
+const HTF={"1m":"5m","5m":"15m","15m":"1h","1h":"4h","4h":"1d","1d":"1w"};
+const fmt=v=>v>=100?v.toFixed(2):v>=1?v.toFixed(4):v.toFixed(8);
+const ema=(a,p)=>{const k=2/(p+1);let e=a[0];return a.map((v,i)=>i?e=v*k+e*(1-k):e)};
+const avg=a=>a.reduce((x,y)=>x+y,0)/a.length;
+const P=k=>({o:k.map(x=>+x[1]),h:k.map(x=>+x[2]),l:k.map(x=>+x[3]),c:k.map(x=>+x[4]),v:k.map(x=>+x[5]),t:k.map(x=>+x[0])});
+
+function rsiS(c,p=14){const o=Array(c.length).fill(50);let g=0,s=0;
+  for(let i=1;i<=p;i++){const d=c[i]-c[i-1];d>0?g+=d:s-=d}g/=p;s/=p;
+  for(let i=p+1;i<c.length;i++){const d=c[i]-c[i-1];g=(g*(p-1)+Math.max(d,0))/p;s=(s*(p-1)+Math.max(-d,0))/p;o[i]=100-100/(1+g/(s||1e-9))}return o}
+function atrS(h,l,c,p=14){const o=Array(c.length).fill(0),t=[0];
+  for(let i=1;i<c.length;i++)t.push(Math.max(h[i]-l[i],Math.abs(h[i]-c[i-1]),Math.abs(l[i]-c[i-1])));
+  let a=0;for(let i=1;i<=p;i++)a+=t[i]/p;o[p]=a;for(let i=p+1;i<c.length;i++){a=(a*(p-1)+t[i])/p;o[i]=a}return o}
+function adxS(h,l,c,p=14){const o=Array(c.length).fill(0);let tr=0,pd=0,md=0,ax=0;
+  for(let i=1;i<c.length;i++){
+    const up=h[i]-h[i-1],dn=l[i-1]-l[i],t=Math.max(h[i]-l[i],Math.abs(h[i]-c[i-1]),Math.abs(l[i]-c[i-1]));
+    const A=up>dn&&up>0?up:0,B=dn>up&&dn>0?dn:0;
+    if(i<=p){tr+=t;pd+=A;md+=B}else{tr+=t-tr/p;pd+=A-pd/p;md+=B-md/p}
+    if(i>=p){const a=100*pd/tr,b=100*md/tr,dx=100*Math.abs(a-b)/((a+b)||1);ax=i===p?dx:(ax*(p-1)+dx)/p;o[i]=ax}
+  }return o}
+function swings(h,l,k=3){const H=[],L=[];
+  for(let i=k;i<h.length-k;i++){let a=1,b=1;
+    for(let j=1;j<=k;j++){if(h[i]<=h[i-j]||h[i]<=h[i+j])a=0;if(l[i]>=l[i-j]||l[i]>=l[i+j])b=0}
+    if(a)H.push(h[i]);if(b)L.push(l[i])}return{H,L}}
+
+async function load(sym,tf,lim){
+  let err;
+  for(const h of HOSTS){
+    try{const r=await fetch(`${h}/api/v3/klines?symbol=${sym}&interval=${tf}&limit=${lim||1000}`);
+      if(!r.ok)throw new Error(r.status===400?"نماد پیدا نشد":"خطای صرافی "+r.status);
+      return await r.json()}catch(e){err=e}
+  }throw err;
+}
+
+function struct(h,l,c,K=3){
+  const SH=[],SL=[];
+  for(let i=K;i<c.length-K;i++){let a=1,b=1;
+    for(let j=1;j<=K;j++){if(h[i]<=h[i-j]||h[i]<=h[i+j])a=0;if(l[i]>=l[i-j]||l[i]>=l[i+j])b=0}
+    if(a)SH.push({i,v:h[i]});if(b)SL.push({i,v:l[i]})}
+  let tr=0,ev=[],ph=0,pw=0,a=0,b=0;
+  for(let i=K;i<c.length;i++){
+    while(a<SH.length&&SH[a].i<=i-K)ph=SH[a++];
+    while(b<SL.length&&SL[b].i<=i-K)pw=SL[b++];
+    if(ph&&c[i]>ph.v){ev.push({i,d:1,t:tr<0?"CHoCH":"BOS",s:ph});tr=1;ph=0}
+    else if(pw&&c[i]<pw.v){ev.push({i,d:-1,t:tr>0?"CHoCH":"BOS",s:pw});tr=-1;pw=0}
+  }
+  return{SH,SL,tr,ev};
+}
+
+function smc(D,ht,kz){
+  const {o,h,l,c}=D,n=c.length-1,p=c[n],A=atrS(h,l,c)[n];
+  const {SH,SL,tr,ev}=struct(h,l,c);
+  const OB=[],FV=[];
+  ev.slice(-8).forEach(e=>{
+    const d=e.d,i0=Math.max(0,e.i-25);let m=i0;
+    for(let j=i0;j<=e.i;j++)if(d>0?l[j]<l[m]:h[j]>h[m])m=j;
+    let k=m;while(k>0&&m-k<4&&!(d>0?c[k]<o[k]:c[k]>o[k]))k--;
+    let ok=k<e.i;for(let j=e.i+1;j<=n&&ok;j++)if(d>0?c[j]<l[k]:c[j]>h[k])ok=0;
+    if(ok)OB.push({d,lo:l[k],hi:h[k],t:"OB",i:k})});
+  for(let i=Math.max(2,n-120);i<=n;i++){
+    const u=l[i]>h[i-2],w=h[i]<l[i-2];if(!u&&!w)continue;
+    const lo=u?h[i-2]:h[i],hi=u?l[i]:l[i-2];if(hi-lo<.1*A)continue;
+    let ok=1;for(let j=i+1;j<=n&&ok;j++)if(u?l[j]<=lo:h[j]>=hi)ok=0;
+    if(ok)FV.push({d:u?1:-1,lo,hi,t:"FVG",i:i-2})}
+  let sb=0,ss=0;const sws=[];
+  for(let j=Math.max(0,n-7);j<=n;j++){
+    for(const s of SL.slice(-12))if(s.i<j-1&&l[j]<s.v&&c[j]>s.v){sb=sb?Math.min(sb,l[j]):l[j];sws.push({j,v:s.v,d:1})}
+    for(const s of SH.slice(-12))if(s.i<j-1&&h[j]>s.v&&c[j]<s.v){ss=Math.max(ss,h[j]);sws.push({j,v:s.v,d:-1})}}
+  const RH=Math.max(...h.slice(-100)),RL=Math.min(...l.slice(-100)),RG=RH-RL,EQ=(RH+RL)/2;
+  const rec=ev.length&&n-ev.at(-1).i<=60?ev.at(-1):0;
+  const evalDir=d=>{
+    const near=[...OB,...FV].filter(z=>z.d===d&&(d>0?z.lo<p:z.hi>p)&&Math.abs((z.lo+z.hi)/2-p)<8*A)
+      .sort((x,y)=>Math.abs((x.lo+x.hi)/2-p)-Math.abs((y.lo+y.hi)/2-p));
+    const z=near.find(x=>x.t==="OB")||near[0],mid=z?(z.lo+z.hi)/2:0,nm=d>0?"صعودی":"نزولی";
+    const ol=d>0?RH-.79*RG:RL+.62*RG,oh=d>0?RH-.62*RG:RL+.79*RG;
+    let s=0;const it=[];
+    const add=(pt,t,ok)=>{it.push([pt,t,!!ok]);if(ok)s+=pt};
+    add(20,"هم‌جهت با ساختار تایم‌فریم بالاتر",ht===d);
+    add(15,"ساختار فعلی "+nm,tr===d);
+    add(rec&&rec.t==="CHoCH"?12:8,"شکست ساختار (MSS) "+nm+" در ۶۰ کندل اخیر",rec&&rec.d===d);
+    add(15,d>0?"جارو شدن نقدینگی کف‌ها و برگشت":"جارو شدن نقدینگی سقف‌ها و برگشت",d>0?sb:ss);
+    add(15,"ناحیه ورود: اوردر بلاک معتبر",z&&z.t==="OB");
+    add(10,"FVG پرنشده هم‌پوشان با ناحیه ورود",z&&FV.some(f=>f.d===d&&f!==z&&f.lo<=z.hi&&f.hi>=z.lo));
+    add(10,d>0?"ناحیه در Discount است":"ناحیه در Premium است",z&&(d>0?mid<EQ:mid>EQ));
+    add(5,"هم‌پوشانی با OTE (فیبو ۶۲٪ تا ۷۹٪)",z&&z.lo<=oh&&z.hi>=ol);
+    add(5,"داخل Kill Zone (لندن/نیویورک)",kz);
+    return{d,s:Math.min(100,s),it,z};
+  };
+  const R=[evalDir(1),evalDir(-1)],best=R[0].s>=R[1].s?R[0]:R[1];
+  const ok=best.z&&best.s>=65&&ht!==-best.d&&(tr===best.d||(rec&&rec.d===best.d));
+  const plan=(d,z)=>{
+    const mid=(z.lo+z.hi)/2,e=d>0?Math.min(p,mid):Math.max(p,mid);
+    const base=d>0?Math.min(z.lo,sb||z.lo)-.25*A:Math.max(z.hi,ss||z.hi)+.25*A;
+    const st=d>0?Math.min(base,e-.5*A):Math.max(base,e+.5*A),risk=Math.abs(e-st);
+    const liq=(d>0?SH.map(x=>x.v).filter(v=>v>e):SL.map(x=>x.v).filter(v=>v<e)).sort((x,y)=>d>0?x-y:y-x);
+    const pool=liq.filter(v=>Math.abs(v-e)>=1.5*risk),t1=pool[0]??e+d*1.5*risk;
+    const t2=pool.find(v=>Math.abs(v-e)>=Math.max(2.5*risk,1.2*Math.abs(t1-e)))??e+d*Math.max(3*risk,1.5*Math.abs(t1-e));
+    return{e,st,risk,t1,t2};
+  };
+  return{c,o,h,l,t:D.t,OB,FV,sws,evs:ev.slice(-6),p,A,tr,ev:ev.at(-1)||0,sb,ss,EQ,R,best,dir:ok?best.d:0,pl:ok?plan(best.d,best.z):0,kz};
+}
+
+function backtest(D){
+  const n=D.c.length-1;let t=0,w=0,sr=0,ls=0;const sigs=[];
+  for(let i=260;i<n-3;i+=4){
+    const W=a=>a.slice(Math.max(0,i-299),i+1);
+    const r=smc({o:W(D.o),h:W(D.h),l:W(D.l),c:W(D.c)},0,0);
+    if(!r.dir)continue;
+    const {e,st,t1,risk}=r.pl,d=r.dir;let f=-1,res=0;
+    for(let j=i+1;j<=Math.min(n,i+20);j++)if(d>0?D.l[j]<=e:D.h[j]>=e){f=j;break}
+    ls={i,d,pl:r.pl,z:r.best.z,off:Math.max(0,i-299),s:"nofill",f};sigs.push(ls);if(f<0)continue;
+    for(let j=f;j<=Math.min(n,f+60);j++){
+      if(d>0?D.l[j]<=st:D.h[j]>=st){res=-1;ls.x=j;break}
+      if(d>0?D.h[j]>=t1:D.l[j]<=t1){res=Math.abs(t1-e)/risk;ls.x=j;break}}
+    ls.s=res<0?"sl":res>0?"tp":"open";if(res){t++;sr+=res;if(res>0)w++;i+=8}
+  }
+  return{t,win:t?w/t:0,r:t?sr/t:0,last:ls,all:sigs};
+}
+
+function analyze(K,HK){
+  const D=P(K);if(D.c.length<300)throw new Error("داده تاریخی این نماد برای تحلیل کافی نیست");
+  const hc=P(HK),hs=struct(hc.h,hc.l,hc.c);
+  const nyH=+new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",hour:"numeric",hourCycle:"h23"}).format(new Date());
+  const a=smc(D,hs.tr,(nyH>=2&&nyH<5)||(nyH>=7&&nyH<10));
+  a.ht=hs.tr;a.n=D.c.length;a.bt=backtest(D);return a;
+}
+
+function tbl(q,z){
+  const cap=+$("cap").value,rk=+$("rk").value;let sz="";
+  const rr=v=>(Math.abs(v-q.e)/q.risk).toFixed(1);
+  if(cap>0&&rk>0&&q.risk>0){const u=cap*rk/100/q.risk,val=u*q.e,lv=val/cap;
+    sz=`<tr><td>حجم پوزیشن (ریسک ${rk}٪)</td><td>${fmt(u)} ≈ ${val.toFixed(0)}$${lv>1?" · اهرم "+lv.toFixed(1)+"x":""}</td></tr>`}
+  return `<table>
+  <tr><td>ناحیه ${z.t}</td><td>${fmt(z.lo)} – ${fmt(z.hi)}</td></tr>
+  <tr><td>نقطه ورود</td><td>${fmt(q.e)}</td></tr>
+  <tr><td>حد ضرر (${(q.risk/q.e*100).toFixed(2)}٪)</td><td class="dn">${fmt(q.st)}</td></tr>
+  <tr><td>هدف ۱ — نقدینگی (${rr(q.t1)}R)</td><td class="up">${fmt(q.t1)}</td></tr>
+  <tr><td>هدف ۲ (${rr(q.t2)}R)</td><td class="up">${fmt(q.t2)}</td></tr>${sz}</table>`;
+}
+
+let VW={N:0,off:0,key:""};
+const curN=()=>Math.max(15,Math.min(VW.N||+$("vis").value||120,LA.c.length-1));
+function clampView(){const n=LA.c.length-1;VW.off=Math.max(0,Math.min(VW.off,n-curN()+1))}
+function redraw(){if(LA&&$("cv"))draw(LA)}
+function zoomTo(nn,px){
+  const n=LA.c.length-1,W=$("cv").clientWidth,N0=curN(),N1=Math.max(15,Math.min(Math.round(nn),n));
+  const ax=Math.min(1,Math.max(0,px/(W-60)*(N0+6)/N0)),s0=n-VW.off-N0+1,ai=s0+ax*N0,s1=ai-ax*N1;
+  VW.N=N1;VW.off=n-(s1+N1-1);clampView();redraw();
+}
+function bindZoom(cv){
+  const Pt=new Map();let d0=0,N0=0,lx=0;
+  const dist=()=>{const [a,b]=[...Pt.values()];return Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY)};
+  cv.addEventListener("pointerdown",e=>{try{cv.setPointerCapture(e.pointerId)}catch(_){}Pt.set(e.pointerId,e);if(Pt.size===2){d0=dist();N0=curN()}lx=e.clientX});
+  cv.addEventListener("pointermove",e=>{if(!Pt.has(e.pointerId))return;Pt.set(e.pointerId,e);
+    if(Pt.size===2){const [a,b]=[...Pt.values()],d=dist();if(d0>5&&d>5)zoomTo(N0*d0/d,(a.clientX+b.clientX)/2-cv.getBoundingClientRect().left)}
+    else{const cw=(cv.clientWidth-60)/(curN()+6);VW.off+=(e.clientX-lx)/cw;lx=e.clientX;clampView();redraw()}});
+  const up=e=>{Pt.delete(e.pointerId);if(Pt.size===1)lx=[...Pt.values()][0].clientX};
+  cv.addEventListener("pointerup",up);cv.addEventListener("pointercancel",up);
+  cv.addEventListener("wheel",e=>{e.preventDefault();zoomTo(curN()*(e.deltaY>0?1.12:.89),e.clientX-cv.getBoundingClientRect().left)},{passive:false});
+  cv.addEventListener("dblclick",()=>{VW.N=0;VW.off=0;redraw()});
+  const R=()=>cv.clientWidth-60;
+  $("zi").onclick=()=>zoomTo(curN()*.75,R());$("zo").onclick=()=>zoomTo(curN()*1.33,R());
+  $("zr").onclick=()=>{VW.N=0;VW.off=0;redraw()};
+}
+
+function draw(a){
+  const cv=$("cv"),dpr=devicePixelRatio||1,W=cv.clientWidth,H=cv.clientHeight,PR=60,PB=16,E=6;
+  cv.width=W*dpr;cv.height=H*dpr;const x=cv.getContext("2d");x.scale(dpr,dpr);
+  const n=a.c.length-1,N=curN(),off=Math.max(0,Math.min(VW.off,n-N+1)),en=n-off,s0=en-N+1,g=a.sig,q=g&&g.pl,bz=g&&g.z;
+  const vals=[...a.h.slice(Math.max(0,s0),en+1),...a.l.slice(Math.max(0,s0),en+1)];
+  let lo=Math.min(...vals),hi=Math.max(...vals);const cr=hi-lo;
+  if(q)[q.st,q.t1,q.t2].forEach(v=>{if(v>lo-cr*.6&&v<hi+cr*.6)vals.push(v)});
+  lo=Math.min(...vals);hi=Math.max(...vals);const pad=(hi-lo)*.05;lo-=pad;hi+=pad;
+  const cw=(W-PR)/(N+E),X=i=>(i-s0+.5)*cw,Y=v=>6+(hi-v)/(hi-lo)*(H-PB-6),Yc=v=>Math.min(Math.max(Y(v),4),H-PB-2),R=W-PR;
+  x.font="9px system-ui,sans-serif";x.textBaseline="middle";x.lineWidth=1;
+  for(let k=0;k<=4;k++){const v=lo+(hi-lo)*k/4,y=Y(v);
+    x.strokeStyle="#27323f";x.beginPath();x.moveTo(0,y);x.lineTo(R,y);x.stroke();
+    x.fillStyle="#8795a6";x.textAlign="left";x.fillText(fmt(v),R+3,y)}
+  const box=(z,al)=>{if(z.hi<lo||z.lo>hi||z.i>en)return;
+    const xs=Math.max(0,X(Math.max(z.i,s0))-cw/2),y1=Yc(z.hi),y2=Yc(z.lo);
+    x.fillStyle=(z.d>0?"rgba(53,194,138,":"rgba(239,91,91,")+al+")";x.fillRect(xs,y1,R-xs,y2-y1);
+    if(z===bz){x.strokeStyle=z.d>0?"#35c28a":"#ef5b5b";x.strokeRect(xs,y1,R-xs,y2-y1)}
+    x.fillStyle="#8795a6";x.textAlign="left";x.fillText(z.t,xs+3,y1+7)};
+  [...a.FV].sort((u,v)=>Math.abs((u.lo+u.hi)/2-a.p)-Math.abs((v.lo+v.hi)/2-a.p)).slice(0,5).forEach(z=>box(z,.1));
+  a.OB.forEach(z=>box(z,z===bz?.25:.12));
+  if(g&&g.hist)box(bz,.25);
+  for(let i=Math.max(0,s0);i<=en;i++){const col=a.c[i]>=a.o[i]?"#35c28a":"#ef5b5b",cx=X(i),bw=Math.max(2,cw*.7);
+    x.strokeStyle=col;x.fillStyle=col;x.beginPath();x.moveTo(cx,Y(a.h[i]));x.lineTo(cx,Y(a.l[i]));x.stroke();
+    const y1=Y(Math.max(a.o[i],a.c[i])),y2=Y(Math.min(a.o[i],a.c[i]));x.fillRect(cx-bw/2,y1,bw,Math.max(1,y2-y1))}
+  a.evs.forEach(v=>{if(!v.s||v.i<s0||v.i>en)return;
+    const xs=X(Math.max(v.s.i,s0)),xe=X(v.i),y=Y(v.s.v),col=v.d>0?"#35c28a":"#ef5b5b";
+    x.strokeStyle=col;x.setLineDash([4,3]);x.beginPath();x.moveTo(xs,y);x.lineTo(xe,y);x.stroke();x.setLineDash([]);
+    x.fillStyle=col;x.textAlign="center";x.fillText(v.t,(xs+xe)/2,y+(v.d>0?-6:8))});
+  a.sws.forEach(s=>{if(s.j<s0||s.j>en)return;const y=Y(s.v),cx=X(s.j);
+    x.fillStyle="#e0b84c";x.beginPath();x.arc(cx,y,3,0,7);x.fill();x.textAlign="center";x.fillText("Sweep",cx,y+(s.d>0?11:-8))});
+  const x0=g&&g.hist?X(Math.max(g.i,s0)):0;
+  const hl=(v,col,t,dash)=>{const y=Yc(v),cl=y!==Y(v);x.strokeStyle=col;x.setLineDash(dash);x.beginPath();x.moveTo(x0,y);x.lineTo(R,y);x.stroke();
+    x.setLineDash([]);x.fillStyle=col;x.textAlign="left";x.fillText(t+(cl?(v>hi?" ↑ ":" ↓ ")+fmt(v):""),x0+4,y-5)};
+  if(q){hl(q.e,"#8795a6","Entry",[5,4]);hl(q.st,"#ef5b5b","SL",[5,4]);hl(q.t1,"#35c28a","TP1",[5,4]);hl(q.t2,"#35c28a","TP2",[5,4])}
+  const arrow=(i,d,al,t)=>{if(i<s0||i>en)return;const cx=X(i),u=d>0?1:-1,y=d>0?Y(a.l[i])+5:Y(a.h[i])-5;
+    x.globalAlpha=al;x.fillStyle=d>0?"#35c28a":"#ef5b5b";x.beginPath();x.moveTo(cx,y);x.lineTo(cx-4,y+u*7);x.lineTo(cx+4,y+u*7);x.fill();
+    if(t){x.font="bold 10px system-ui,sans-serif";x.textAlign="center";x.fillText(t,cx,y+u*17);x.font="9px system-ui,sans-serif"}x.globalAlpha=1};
+  a.bt.all.forEach(s=>arrow(s.i,s.d,.4,""));
+  if(g){arrow(g.i,g.d,1,g.d>0?"Buy":"Sell");
+    if(g.hist){const mk=(i,v,col,t)=>{if(i==null||i<s0||i>en)return;const cx=X(i),y=Yc(v);x.fillStyle=col;x.beginPath();x.arc(cx,y,3.5,0,7);x.fill();x.textAlign="center";x.fillText(t,cx,y-9)};
+      if(g.f>=0)mk(g.f,q.e,"#e8edf3","Entry");if(g.s==="tp")mk(g.x,q.t1,"#35c28a","TP");if(g.s==="sl")mk(g.x,q.st,"#ef5b5b","SL")}}
+  const py=Yc(a.p),pc=a.c[n]>=a.o[n]?"#35c28a":"#ef5b5b";
+  x.strokeStyle=pc;x.setLineDash([1,3]);x.beginPath();x.moveTo(0,py);x.lineTo(R,py);x.stroke();x.setLineDash([]);
+  x.fillStyle=pc;x.fillRect(R,py-7,PR,14);x.fillStyle="#10151c";x.textAlign="left";x.fillText(fmt(a.p),R+3,py);
+  if(a.t){const day=$("tf").value==="1d";x.fillStyle="#8795a6";
+    for(let k=0;k<4;k++){const i=Math.max(0,s0)+Math.round((en-Math.max(0,s0))*k/3),d=new Date(a.t[i]);
+      x.textAlign=k?k<3?"center":"right":"left";
+      x.fillText(day?d.toLocaleDateString([],{month:"short",day:"numeric"}):d.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}),k===0?2:k===3?R-2:X(i),H-6)}}
+}
+
+function render(sym,tf,a){
+  const b=a.best,d=a.dir,cls=d>0?"long":d<0?"short":"wait",
+  lab=d>0?"ستاپ خرید (Long)":d<0?"ستاپ فروش (Short)":"ستاپ معتبر نیست",
+  grade=d?(b.s>=80?"درجه A+":"درجه A"):"حداقل امتیاز ورود: ۶۵",
+  nm=v=>v>0?"صعودی":v<0?"نزولی":"نامشخص",e=a.ev,dist=a.pl?Math.abs(a.pl.e-a.p)/a.A:0;
+  const L=d?0:a.bt.last,ft=i=>a.t?new Date(a.t[i]).toLocaleString([],{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}):"",
+  stx={nofill:"قیمت به نقطه ورود نرسید و سیگنال اجرا نشد",sl:"حد ضرر خورد",tp:"به هدف ۱ رسید",open:"هنوز باز است (نه حد ضرر نه هدف ۱)"},
+  lastH=L?`<h2>آخرین سیگنال ${L.d>0?"خرید":"فروش"} (${ft(L.i)})</h2><p style="margin:4px 0;color:var(--ac)">وضعیت: ${stx[L.s]}</p>${tbl(L.pl,L.z)}`:"";
+  const body=d
+    ?`<h2>نقاط معامله</h2><p style="margin:4px 0;color:var(--ac)">${dist>.25?`سفارش لیمیت: صبر کن قیمت به ناحیه برگردد (${dist.toFixed(1)} ATR فاصله)`:"قیمت داخل ناحیه ورود است"}</p>${tbl(a.pl,b.z)}`
+    :`<h2>ناحیه‌های تحت نظر</h2><table>${a.R.map(r=>r.z?`<tr><td>${r.d>0?"خرید":"فروش"} (${r.z.t}) · امتیاز ${r.s}</td><td>${fmt(r.z.lo)} – ${fmt(r.z.hi)}</td></tr>`:"").join("")}</table>
+      <p style="margin:4px 0;color:var(--mu)">وقتی امتیاز هم‌جهت به ۶۵ برسد و ساختار تأیید شود، ستاپ فعال می‌شود. وارد نشدن هم یک تصمیم حرفه‌ای است.</p>${lastH}`;
+  const k=a.bt,bt=k.t<10?`نمونه کم است (${k.t} معامله)؛ به این عدد تکیه نکن.`
+    :`${k.t} معامله · نرخ برد ${(k.win*100).toFixed(0)}٪ · میانگین ${k.r>=0?"+":""}${k.r.toFixed(2)}R`;
+  const sw=[a.sb?"کف‌ها":"",a.ss?"سقف‌ها":""].filter(Boolean).join(" و ")||"ندارد";
+  $("out").innerHTML=`
+  <div class="sig ${cls}"><b>${lab}</b><br><span id="nm"></span> <span class="px" id="px">${fmt(a.p)}</span>
+  <div class="bar" role="img" aria-label="ضریب اطمینان"><i style="width:${b.s}%"></i></div>
+  <small style="color:var(--mu)">ضریب اطمینان (همگرایی) ${b.s}٪ · ${grade}</small><br><small id="upd" style="color:var(--mu)"></small></div>
+  ${tf==="1m"||tf==="5m"?'<p style="margin:0 0 10px;color:var(--ac);font-size:13px">تایم‌فریم کوتاه نویز و کارمزد زیادی دارد؛ فاصله حد ضرر را با کارمزد مقایسه کن.</p>':""}
+  <canvas id="cv"></canvas>
+  <div class="zb"><button id="zi" aria-label="بزرگ‌نمایی">＋</button><button id="zo" aria-label="کوچک‌نمایی">－</button><button id="zr">بازنشانی</button></div>
+  <p class="note" style="margin:6px 0 0">کندل‌ها واقعی‌اند. مستطیل‌ها OB و FVG، خط‌چین‌ها BOS/CHoCH، نقطه زرد جارو شدن نقدینگی و فلش‌ها سیگنال‌ها هستند. با دو انگشت زوم کن، با کشیدن جابه‌جا شو و با دوبار لمس بازنشانی کن.</p>${body}
+  <h2>چک‌لیست همگرایی (SMC / ICT)</h2><table>${b.it.map(([pt,t,ok])=>`<tr><td class="${ok?"up":""}" style="${ok?"":"color:var(--mu)"}">${ok?"✓":"✗"} ${t}</td><td>${ok?"+"+pt:"0"}</td></tr>`).join("")}</table>
+  <h2>وضعیت بازار</h2><table>
+  <tr><td>ساختار این تایم‌فریم</td><td>${nm(a.tr)}</td></tr>
+  <tr><td>آخرین شکست ساختار</td><td>${e?`${e.t} ${nm(e.d)} · ${a.c.length-1-e.i} کندل پیش`:"—"}</td></tr>
+  <tr><td>ساختار ${HTF[tf]}</td><td>${nm(a.ht)}</td></tr>
+  <tr><td>جارو شدن نقدینگی</td><td>${sw}</td></tr>
+  <tr><td>قیمت نسبت به تعادل (${fmt(a.EQ)})</td><td>${a.p<a.EQ?"Discount":"Premium"}</td></tr>
+  <tr><td>Kill Zone</td><td>${a.kz?"فعال":"خارج از بازه"}</td></tr></table>
+  <h2>بک‌تست همین قوانین روی ${a.n} کندل اخیر (خروج در هدف ۱)</h2><p style="margin:4px 0;color:var(--mu)">${bt}</p>`;
+  $("nm").textContent=sym+" · "+tf;
+  a.sig=d?{pl:a.pl,z:b.z,i:a.c.length-1,d}:L?{pl:L.pl,z:{...L.z,i:L.z.i+L.off},i:L.i,d:L.d,f:L.f,x:L.x,s:L.s,hist:1}:0;
+  if(VW.key!==sym+tf){VW.N=0;VW.off=0;VW.key=sym+tf}
+  LA=a;draw(a);bindZoom($("cv"));
+}
+
+let ws=null,timer=null,liveKey="",LA=null;
+function stopLive(){liveKey="";if(ws){ws.onclose=null;ws.close();ws=null}clearInterval(timer)}
+function startLive(sym,tf){
+  stopLive();const key=liveKey=sym+tf;let last=0;
+  const open=()=>{
+    try{ws=new WebSocket(`wss://stream.binance.com:9443/ws/${sym.toLowerCase()}@miniTicker`);
+      ws.onmessage=m=>{const v=+JSON.parse(m.data).c,el=$("px");if(!el||!v)return;el.textContent=fmt(v);el.style.color=v>=last?"var(--up)":"var(--dn)";last=v};
+      ws.onclose=()=>{if(liveKey===key)setTimeout(open,3000)}}catch(e){}};
+  open();
+  timer=setInterval(()=>run(true),tf==="1m"||tf==="5m"?30000:60000);
+}
+async function run(quiet){
+  const sym=$("sym").value.trim().toUpperCase(),tf=$("tf").value;
+  if(!sym)return;
+  try{localStorage.cap=$("cap").value;localStorage.rk=$("rk").value}catch(e){}
+  $("go").disabled=true;
+  if(!quiet)$("out").innerHTML='<p style="color:var(--mu)">در حال دریافت داده از صرافی…</p>';
+  try{
+    const [K,HK]=await Promise.all([load(sym,tf,+$("cnt").value),load(sym,HTF[tf],300)]);
+    render(sym,tf,analyze(K,HK));
+    $("upd").textContent="آخرین تحلیل: "+new Date().toLocaleTimeString();
+    if($("live").checked){if(liveKey!==sym+tf)startLive(sym,tf)}else stopLive();
+  }catch(e){
+    if(quiet&&$("upd"))$("upd").textContent="به‌روزرسانی ناموفق بود؛ دوباره تلاش می‌شود";
+    else{const p=document.createElement("p");p.className="dn";p.textContent="دریافت داده ناموفق بود: "+e.message+". نماد را به شکل BTCUSDT بنویس و اینترنت (یا VPN) را بررسی کن.";$("out").replaceChildren(p)}
+  }
+  $("go").disabled=false;
+}
+try{$("cap").value=localStorage.cap||1000;$("rk").value=localStorage.rk||1}catch(e){$("cap").value=1000;$("rk").value=1}
+["BTCUSDT","ETHUSDT","SOLUSDT","BNBUSDT","XRPUSDT"].forEach(s=>{const b=document.createElement("button");b.textContent=s.replace("USDT","");
+  b.onclick=()=>{$("sym").value=s;run()};$("chips").append(b)});
+$("go").addEventListener("click",()=>run());
+$("vis").addEventListener("change",()=>{VW.N=0;VW.off=0;redraw()});
+$("cnt").addEventListener("change",()=>{if(LA)run()});
+$("live").addEventListener("change",()=>{$("live").checked?run(true):stopLive()});
+$("sym").addEventListener("keydown",e=>{if(e.key==="Enter")run()});
+</script>
+</body>
+</html>
