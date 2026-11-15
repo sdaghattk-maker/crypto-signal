@@ -53,7 +53,7 @@ ul{padding:0 18px;margin:6px 0;color:var(--mu)}
 </div>
 <label style="display:block;font-size:11px;color:var(--mu);margin-bottom:10px">آدرس Worker برای تحلیل هوشمند (اختیاری)<input id="wk" type="url" dir="ltr" placeholder="https://xxxx.workers.dev" style="text-transform:none"></label>
 <div class="row">
-  <label>تعداد کندل تحلیل<select id="cnt"><option>300</option><option>500</option><option>750</option><option selected>1000</option></select></label>
+  <label>تعداد کندل تحلیل<select id="cnt"><option>300</option><option>500</option><option>750</option><option selected>1000</option><option>3000</option><option>5000</option><option>10000</option></select></label>
   <label>کندل روی نمودار<select id="vis"><option>60</option><option selected>120</option><option>200</option></select></label>
 </div>
 <div id="out"><p style="color:var(--mu)">نماد را بنویس یا یکی از میانبرها را بزن.</p></div>
@@ -86,13 +86,36 @@ function swings(h,l,k=3){const H=[],L=[];
     for(let j=1;j<=k;j++){if(h[i]<=h[i-j]||h[i]<=h[i+j])a=0;if(l[i]>=l[i-j]||l[i]>=l[i+j])b=0}
     if(a)H.push(h[i]);if(b)L.push(l[i])}return{H,L}}
 
-async function load(sym,tf,lim){
+async function load(sym,tf,lim,end){
   let err;
   for(const h of HOSTS){
-    try{const r=await fetch(`${h}/api/v3/klines?symbol=${sym}&interval=${tf}&limit=${lim||1000}`);
+    try{const r=await fetch(`${h}/api/v3/klines?symbol=${sym}&interval=${tf}&limit=${lim||1000}${end?"&endTime="+end:""}`);
       if(!r.ok)throw new Error(r.status===400?"نماد پیدا نشد":"خطای صرافی "+r.status);
       return await r.json()}catch(e){err=e}
   }throw err;
+}
+
+let CK=null;
+async function loadN(sym,tf,N,cb){
+  let all=[],end=0;
+  while(all.length<N){
+    const need=Math.min(1000,N-all.length),page=await load(sym,tf,need,end);
+    if(!page.length)break;
+    all=page.concat(all);if(cb)cb(all.length);
+    if(page.length<need)break;
+    end=page[0][0]-1;
+  }
+  return all;
+}
+async function getK(sym,tf,N,quiet,cb){
+  const key=sym+tf+N;
+  if(quiet&&CK&&CK.key===key&&CK.K.length){
+    const tail=await load(sym,tf,300),K=CK.K;
+    if(tail.length&&K[K.length-1][0]>=tail[0][0]){
+      let i=K.length;while(i>0&&K[i-1][0]>=tail[0][0])i--;
+      CK.K=K.slice(0,i).concat(tail);return CK.K}
+  }
+  const K=await loadN(sym,tf,N,cb);CK={key,K};return K;
 }
 
 function struct(h,l,c,K=3){
@@ -180,12 +203,12 @@ function backtest(D){
   return{t,win:t?w/t:0,r:t?sr/t:0,last:ls,all:sigs};
 }
 
-function analyze(K,HK){
+function analyze(K,HK,prev){
   const D=P(K);if(D.c.length<300)throw new Error("داده تاریخی این نماد برای تحلیل کافی نیست");
   const hc=P(HK),hs=struct(hc.h,hc.l,hc.c);
   const nyH=+new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",hour:"numeric",hourCycle:"h23"}).format(new Date());
   const a=smc(D,hs.tr,(nyH>=2&&nyH<5)||(nyH>=7&&nyH<10));
-  a.ht=hs.tr;a.n=D.c.length;a.bt=backtest(D);return a;
+  a.ht=hs.tr;a.n=prev?prev.n:D.c.length;a.bt=prev?prev.bt:backtest(D);return a;
 }
 
 function tbl(q,z){
@@ -402,8 +425,11 @@ async function run(quiet){
   $("go").disabled=true;
   if(!quiet)$("out").innerHTML='<p style="color:var(--mu)">در حال دریافت داده از صرافی…</p>';
   try{
-    const [K,HK]=await Promise.all([load(sym,tf,+$("cnt").value),load(sym,HTF[tf],300)]);
-    render(sym,tf,analyze(K,HK));
+    const cnt=+$("cnt").value,prog=m=>{if(!quiet)$("out").innerHTML='<p style="color:var(--mu)">'+m+'</p>'};
+    const [K,HK]=await Promise.all([getK(sym,tf,cnt,quiet,n=>prog(`در حال دریافت داده… ${n} از ${cnt}`)),load(sym,HTF[tf],300)]);
+    const prev=quiet&&LA&&LKEY===sym+tf&&CK&&CK.key===sym+tf+cnt?LA:null;
+    if(!quiet&&cnt>2000){prog("در حال محاسبه بک‌تست…");await new Promise(r=>setTimeout(r,30))}
+    render(sym,tf,analyze(K,HK,prev));
     $("upd").textContent="آخرین تحلیل: "+new Date().toLocaleTimeString();
     if($("live").checked){if(liveKey!==sym+tf)startLive(sym,tf)}else stopLive();
   }catch(e){
