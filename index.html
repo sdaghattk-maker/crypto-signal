@@ -319,10 +319,20 @@ function render(sym,tf,a){
   const k=a.bt,bt=k.t<10?`نمونه کم است (${k.t} معامله)؛ به این عدد تکیه نکن.`
     :`${k.t} معامله · نرخ برد ${(k.win*100).toFixed(0)}٪ · میانگین ${k.r>=0?"+":""}${k.r.toFixed(2)}R`;
   const sw=[a.sb?"کف‌ها":"",a.ss?"سقف‌ها":""].filter(Boolean).join(" و ")||"ندارد";
+    const sc=b.s,ang=(180-1.8*sc)*Math.PI/180,mx=260+200*Math.cos(ang),my=260-200*Math.sin(ang);
+  const C=d>0?["#2B3850","#1F8F66","#35C28A"]:d<0?["#2B3850","#A93A3A","#EF5B5B"]:["#2B3850","#4A586D","#7F8CA0"];
+  const pill=d>0?["#12392B","#35C28A","#8FE6BF"]:d<0?["#3A1A1A","#EF5B5B","#F5A3A3"]:["#1A2230","#4A586D","#9AA8BA"];
+  const lights=[["ساختار",b.it[1][2]],["تایم‌فریم بالاتر",b.it[0][2]],["نقدینگی",b.it[3][2]],["ناحیه ورود",b.it[4][2]],["Kill Zone",b.it[8][2]]];
+  let ruler="";
+  if(d&&a.pl){const q=a.pl,r1=Math.abs(q.t1-q.e)/q.risk,r2=Math.abs(q.t2-q.e)/q.risk,T=1+r2,PP=[0,100/T,(1+r1)/T*100,100],
+    L4=[["SL","−1R","#EF5B5B"],["Entry","0","#C9D3E0"],["TP1","+"+r1.toFixed(1)+"R","#8FE6BF"],["TP2","+"+r2.toFixed(1)+"R","#8FE6BF"]];
+    ruler=`<div dir="ltr" style="padding:0 26px"><div style="position:relative;height:10px;border-radius:5px;background:#35C28A;margin:30px 0 30px"><div style="position:absolute;left:0;width:${PP[1]}%;height:10px;border-radius:5px 0 0 5px;background:#EF5B5B"></div><div style="position:absolute;left:${PP[1]}%;width:${PP[2]-PP[1]}%;height:10px;background:#1F8F66"></div>${L4.map(([n,v,c],i)=>`<div style="position:absolute;left:${PP[i]}%;top:-22px;transform:translateX(-50%);font-size:11px;color:${c}">${n}</div><div style="position:absolute;left:${PP[i]}%;top:16px;transform:translateX(-50%);font-size:11px;color:var(--mu)">${v}</div>`).join("")}</div></div>`}
+  const idx=`<svg role="img" aria-label="امتیاز همگرایی ${sc} از ۱۰۰" viewBox="0 0 520 300" style="width:100%;max-width:340px;display:block;margin:6px auto 0"><path d="M60 260A200 200 0 0 1 350.8 81.8" fill="none" stroke="${C[0]}" stroke-width="28"/><path d="M350.8 81.8A200 200 0 0 1 421.8 142.4" fill="none" stroke="${C[1]}" stroke-width="28"/><path d="M421.8 142.4A200 200 0 0 1 460 260" fill="none" stroke="${C[2]}" stroke-width="28"/><circle cx="${mx.toFixed(1)}" cy="${my.toFixed(1)}" r="13" fill="#fff" stroke="#10151c" stroke-width="4"/><text x="260" y="246" text-anchor="middle" font-size="96" font-weight="700" fill="#e8edf3">${sc}</text><text x="260" y="278" text-anchor="middle" font-size="18" fill="#8795a6">از ۱۰۰</text><text x="363" y="52" text-anchor="middle" font-size="16" fill="#8795a6">65</text><text x="446" y="124" text-anchor="middle" font-size="16" fill="#8795a6">80</text></svg>
+  <div style="margin:4px auto;width:max-content;max-width:100%;padding:8px 18px;border-radius:12px;border:2px solid ${pill[1]};background:${pill[0]};color:${pill[2]};font-size:16px;font-weight:700">${lab}${d?" · "+grade:""}</div>
+  <div style="font-size:11px;color:var(--mu);text-align:center">امتیاز همگرایی است، نه احتمال برد · ورود از ۶۵ · درجه A+ از ۸۰</div>
+  <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-top:10px">${lights.map(([n,ok])=>`<div style="padding:8px 2px;border-radius:8px;text-align:center;font-size:11px;${ok?"background:#12392B;border:1px solid #1F8F66;color:#8FE6BF":"border:1px solid var(--ln);color:var(--mu)"}">${n}<br>${ok?"✓":"✗"}</div>`).join("")}</div>${ruler}`;
   $("out").innerHTML=`
-  <div class="sig ${cls}"><b>${lab}</b><br><span id="nm"></span> <span class="px" id="px">${fmt(a.p)}</span>
-  <div class="bar" role="img" aria-label="ضریب اطمینان"><i style="width:${b.s}%"></i></div>
-  <small style="color:var(--mu)">ضریب اطمینان (همگرایی) ${b.s}٪ · ${grade}</small><br><small id="upd" style="color:var(--mu)"></small></div>
+  <div class="sig ${cls}"><div style="display:flex;justify-content:space-between;align-items:baseline"><span><span id="nm"></span> <span class="px" id="px">${fmt(a.p)}</span></span><small id="upd" style="color:var(--mu)"></small></div>${idx}</div>
   <div class="zb"><button id="cp">کپی برای AI</button><button id="ai">تحلیل هوشمند</button></div><div id="aiout" style="white-space:pre-wrap;font-size:12px;margin:0 0 10px"></div>
   ${tf==="1m"||tf==="5m"?'<p style="margin:0 0 10px;color:var(--ac);font-size:13px">تایم‌فریم کوتاه نویز و کارمزد زیادی دارد؛ فاصله حد ضرر را با کارمزد مقایسه کن.</p>':""}
   <canvas id="cv"></canvas>
