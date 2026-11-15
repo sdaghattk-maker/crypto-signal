@@ -33,13 +33,21 @@ h2{font-size:13px;color:var(--mu);margin:16px 0 4px;font-weight:600}
 .up{color:var(--up)}.dn{color:var(--dn)}
 canvas{touch-action:pan-y;cursor:grab;user-select:none;-webkit-user-select:none;width:100%;height:440px;background:var(--sf);border-radius:12px}
 .zb{display:flex;gap:6px;margin:6px 0}.zb button{width:auto;padding:2px 12px;font-size:13px;background:var(--sf);color:var(--tx);border:1px solid var(--ln);font-weight:400}
+.net{display:inline-flex;align-items:center;gap:6px;width:auto;padding:3px 10px;font-size:11px;border-radius:999px;color:var(--mu);font-weight:400}
+.net i{width:8px;height:8px;border-radius:50%;background:var(--mu);display:inline-block}
+.net[data-s=ok] i{background:var(--up);animation:pl 1.6s infinite}
+.net[data-s=wait] i{background:var(--ac)}
+.net[data-s=bad] i{background:var(--dn)}
+@keyframes pl{0%{box-shadow:0 0 0 0 rgba(53,194,138,.6)}70%,100%{box-shadow:0 0 0 6px rgba(53,194,138,0)}}
+@media (prefers-reduced-motion:reduce){.net i{animation:none!important}}
+.nd{position:absolute;top:32px;left:0;z-index:5;min-width:200px;padding:8px 10px;border-radius:10px;background:var(--sf);border:1px solid var(--ln);font-size:11px;line-height:1.7;color:var(--tx)}
 ul{padding:0 18px;margin:6px 0;color:var(--mu)}
 .note{font-size:11px;color:var(--mu);margin-top:16px}
 </style>
 </head>
 <body>
 <main>
-<h1>تحلیل SMC / ICT</h1>
+<div style="display:flex;justify-content:space-between;align-items:flex-start"><h1>تحلیل SMC / ICT</h1><div style="position:relative;margin-top:4px"><button class="net" id="net" data-s="idle" aria-label="وضعیت اتصال"><i></i><span id="nt">آماده</span></button><div class="nd" id="nd" hidden></div></div></div>
 <div class="row">
   <input id="sym" value="BTCUSDT" aria-label="نماد" autocapitalize="characters" spellcheck="false">
   <select id="tf" aria-label="تایم‌فریم"><option>1m</option><option>5m</option><option>15m</option><option selected>1h</option><option>4h</option><option>1d</option></select>
@@ -365,6 +373,25 @@ function showAI(){
   ${S.map(([t,c,m,arr])=>`<div style="border:1px solid var(--ln);border-inline-start:3px solid ${c};border-radius:10px;padding:8px 10px;margin-top:8px"><div style="font-size:12px;color:${c};font-weight:700;margin-bottom:4px">${t}</div>${arr.slice(0,5).map(x=>`<div style="display:flex;gap:6px;font-size:12px;line-height:1.6"><span style="color:${c}">${m}</span><span>${esc(x)}</span></div>`).join("")}</div>`).join("")}${foot}</div>`;
 }
 
+const NET={ws:"off",lastMsg:0,rest:"idle",lastRest:0,err:""};
+function paintNet(){
+  const b=$("net");if(!b)return;
+  const live=$("live").checked,now=Date.now(),ag=s=>s<60?s+"ث":Math.floor(s/60)+"د";
+  let s,txt;
+  if(typeof navigator!=="undefined"&&navigator.onLine===false){s="bad";txt="آفلاین"}
+  else if(NET.rest==="loading"){s="wait";txt="دریافت داده…"}
+  else if(NET.rest==="err"){s="bad";txt="قطع"}
+  else if(live){
+    if(NET.ws==="open"&&now-NET.lastMsg<15000){s="ok";txt="زنده"}
+    else if(NET.ws==="connecting"||NET.ws==="open"){s="wait";txt="در حال اتصال"}
+    else{s="bad";txt="قطع زنده"}}
+  else if(NET.rest==="ok"){s="idle";txt="غیرزنده · "+ag(Math.round((now-NET.lastRest)/1000))}
+  else{s="idle";txt="آماده"}
+  b.dataset.s=s;$("nt").textContent=txt;
+  const d=$("nd");if(d&&!d.hidden){
+    const R={idle:"—",loading:"در حال دریافت",ok:"موفق",err:"خطا"}[NET.rest],W={off:"خاموش",connecting:"در حال اتصال",open:"متصل",closed:"قطع"}[NET.ws];
+    d.innerHTML=`داده تاریخی: ${R}${NET.lastRest?" · "+new Date(NET.lastRest).toLocaleTimeString():""}<br>قیمت زنده: ${W}${NET.lastMsg?" · "+Math.round((now-NET.lastMsg)/1000)+" ثانیه پیش":""}${NET.err?`<br><span style="color:var(--dn)">${esc(NET.err)}</span>`:""}`}
+}
 let CLK={o:0,ms:0},ticked=0;
 function tick(){
   if(!CLK.ms||!LA)return;
@@ -427,13 +454,13 @@ function render(sym,tf,a){
 }
 
 let ws=null,timer=null,liveKey="",LA=null;
-function stopLive(){liveKey="";if(ws){ws.onclose=null;ws.close();ws=null}clearInterval(timer)}
+function stopLive(){liveKey="";NET.ws="off";if(ws){ws.onclose=null;ws.close();ws=null}clearInterval(timer)}
 function startLive(sym,tf){
   stopLive();const key=liveKey=sym+tf;let last=0;
   const open=()=>{
-    try{ws=new WebSocket(`wss://stream.binance.com:9443/ws/${sym.toLowerCase()}@miniTicker`);
-      ws.onmessage=m=>{const v=+JSON.parse(m.data).c,el=$("px");if(!el||!v)return;el.textContent=fmt(v);el.style.color=v>=last?"var(--up)":"var(--dn)";last=v};
-      ws.onclose=()=>{if(liveKey===key)setTimeout(open,3000)}}catch(e){}};
+    NET.ws="connecting";try{ws=new WebSocket(`wss://stream.binance.com:9443/ws/${sym.toLowerCase()}@miniTicker`);
+      ws.onmessage=m=>{NET.lastMsg=Date.now();NET.ws="open";const v=+JSON.parse(m.data).c,el=$("px");if(!el||!v)return;el.textContent=fmt(v);el.style.color=v>=last?"var(--up)":"var(--dn)";last=v};
+      ws.onerror=()=>{NET.ws="closed"};ws.onclose=()=>{NET.ws="closed";if(liveKey===key)setTimeout(open,3000)}}catch(e){}};
   open();
   timer=setInterval(()=>run(true),tf==="1m"||tf==="5m"?30000:60000);
 }
@@ -441,18 +468,18 @@ async function run(quiet){
   const sym=$("sym").value.trim().toUpperCase(),tf=$("tf").value;
   if(!sym)return;
   try{localStorage.cap=$("cap").value;localStorage.rk=$("rk").value}catch(e){}
-  $("go").disabled=true;
+  $("go").disabled=true;if(!quiet)NET.rest="loading";
   if(!quiet){$("out").style.minHeight=$("out").offsetHeight+"px";$("out").innerHTML='<p style="color:var(--mu)">در حال دریافت داده از صرافی…</p>'}
   try{
     const cnt=+$("cnt").value,prog=m=>{if(!quiet)$("out").innerHTML='<p style="color:var(--mu)">'+m+'</p>'};
     const [K,HK]=await Promise.all([getK(sym,tf,cnt,quiet,n=>prog(`در حال دریافت داده… ${n} از ${cnt}`)),load(sym,HTF[tf],300)]);
     const prev=quiet&&LA&&LKEY===sym+tf&&CK&&CK.key===sym+tf+cnt?LA:null;
     if(!quiet&&cnt>2000){prog("در حال محاسبه بک‌تست…");await new Promise(r=>setTimeout(r,30))}
-    render(sym,tf,analyze(K,HK,prev));
+    render(sym,tf,analyze(K,HK,prev));NET.rest="ok";NET.lastRest=Date.now();NET.err="";
     $("upd").textContent="آخرین تحلیل: "+new Date().toLocaleTimeString();
     if($("live").checked){if(liveKey!==sym+tf)startLive(sym,tf)}else stopLive();
   }catch(e){
-    if(quiet&&$("upd"))$("upd").textContent="به‌روزرسانی ناموفق بود؛ دوباره تلاش می‌شود";
+    NET.rest="err";NET.err=e.message;if(quiet&&$("upd"))$("upd").textContent="به‌روزرسانی ناموفق بود؛ دوباره تلاش می‌شود";
     else{const p=document.createElement("p");p.className="dn";p.textContent="دریافت داده ناموفق بود: "+e.message+". نماد را به شکل BTCUSDT بنویس و اینترنت (یا VPN) را بررسی کن.";$("out").replaceChildren(p);$("out").style.minHeight=""}
   }
   $("go").disabled=false;
@@ -462,7 +489,10 @@ try{$("wk").value=localStorage.wk||""}catch(e){}
 ["BTCUSDT","ETHUSDT","SOLUSDT","BNBUSDT","XRPUSDT"].forEach(s=>{const b=document.createElement("button");b.textContent=s.replace("USDT","");
   b.onclick=()=>{$("sym").value=s;run()};$("chips").append(b)});
 $("go").addEventListener("click",()=>run());
-setInterval(tick,1000);
+setInterval(()=>{tick();paintNet()},1000);
+$("net").addEventListener("click",()=>{$("nd").hidden=!$("nd").hidden;paintNet()});
+if(typeof addEventListener==="function"){addEventListener("online",paintNet);addEventListener("offline",paintNet)}
+paintNet();
 $("wk").addEventListener("change",()=>{try{localStorage.wk=$("wk").value.trim()}catch(e){}});
 $("vis").addEventListener("change",()=>{VW.N=0;VW.off=0;redraw()});
 $("cnt").addEventListener("change",()=>{if(LA)run()});
