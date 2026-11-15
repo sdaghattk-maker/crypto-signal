@@ -276,7 +276,7 @@ function draw(a){
       x.fillText(day?d.toLocaleDateString([],{month:"short",day:"numeric"}):d.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}),k===0?2:k===3?R-2:X(i),H-6)}}
 }
 
-let LT="";
+let LT="",LTJ="",LKEY="",AI=null;try{AI=JSON.parse(localStorage.ai||"null")}catch(e){}
 function signalText(a,sym,tf){
   const b=a.best,nm=v=>v>0?"صعودی":v<0?"نزولی":"نامشخص",f=fmt;
   const L=a.dir?0:a.bt.last,q=a.dir?a.pl:L?L.pl:0,z=a.dir?b.z:L?L.z:0;
@@ -297,11 +297,33 @@ function bindAI(){
   $("cp").onclick=async()=>{let ok=1;
     try{await navigator.clipboard.writeText(LT)}catch(e){const t=document.createElement("textarea");t.value=LT;document.body.append(t);t.select();try{ok=document.execCommand("copy")}catch(_){ok=0}t.remove()}
     $("cp").textContent=ok?"کپی شد ✓":"کپی نشد";setTimeout(()=>{$("cp").textContent="کپی برای AI"},2000)};
-  $("ai").onclick=async()=>{const u=$("wk").value.trim(),o=$("aiout");
-    if(!u){o.textContent="برای تحلیل هوشمند، آدرس Worker را در بخش بالا وارد کن. یا از «کپی برای AI» استفاده کن.";return}
-    o.textContent="در حال تحلیل…";
-    try{const r=await fetch(u,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({prompt:LT})}),d=await r.json();
-      o.textContent=d.text||d.error||"پاسخی دریافت نشد"}catch(e){o.textContent="اتصال به Worker ناموفق بود: "+e.message}};
+  $("ai").onclick=async()=>{const u=$("wk").value.trim(),key=LKEY,price=LA.p,say=t=>{const x=$("aiout");if(x)x.textContent=t};
+    if(!u){say("برای تحلیل هوشمند، آدرس Worker را در بخش بالا وارد کن. یا از «کپی برای AI» استفاده کن.");return}
+    say("در حال تحلیل…");
+    try{const r=await fetch(u,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({prompt:LTJ})}),j=await r.json();
+      if(!j.text){say(j.error||"پاسخی دریافت نشد");return}
+      AI={key,t:Date.now(),p:price,d:parseAI(j.text),raw:j.text};
+      try{localStorage.ai=JSON.stringify(AI)}catch(e){}
+      showAI()}catch(e){say("اتصال به Worker ناموفق بود: "+e.message)}};
+}
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const JSONINSTR='\n\nبه‌عنوان تحلیلگر محتاط، فقط یک شیء JSON معتبر برگردان (بدون هیچ متن دیگر و بدون ```) با این کلیدها: {"verdict":"ورود" یا "صبر" یا "ورود نکن","risk":عدد ۱ تا ۵ (۵ پرریسک‌ترین),"summary":"یک جمله فارسی","strengths":[حداکثر ۳ مورد],"risks":[حداکثر ۴ مورد],"invalidation":[حداکثر ۳ مورد],"confirm":[حداکثر ۴ مورد]}. هر مورد حداکثر ۱۲ کلمه فارسی. پیش‌بینی قطعی نده و توصیه مالی نکن.';
+function parseAI(tx){const i=tx.indexOf("{"),j=tx.lastIndexOf("}");if(i<0||j<i)return null;
+  try{const d=JSON.parse(tx.slice(i,j+1));return d&&typeof d==="object"?d:null}catch(e){return null}}
+function showAI(){
+  const o=$("aiout");if(!o)return;
+  if(!AI||AI.key!==LKEY){o.innerHTML="";return}
+  const d=AI.d,old=Date.now()-AI.t>18e5,
+  foot=`<div style="font-size:11px;color:var(--mu);margin-top:8px">تحلیل AI · ${new Date(AI.t).toLocaleTimeString()} · قیمت ${fmt(AI.p)}${old?' · <span style="color:var(--ac)">ممکن است قدیمی باشد؛ دوباره بزن</span>':""} · نظر دوم، نه توصیه مالی</div>`;
+  const S=d?[["نقاط قوت","#35c28a","✓",d.strengths],["ریسک‌ها","#ef5b5b","!",d.risks],["شرط ابطال","#e0b84c","✕",d.invalidation],["قبل از ورود تأیید کن","#6aa9ff","☐",d.confirm]].filter(s=>Array.isArray(s[3])&&s[3].length):[];
+  const box="border:1px solid var(--ln);border-radius:12px;padding:12px;background:var(--sf)";
+  if(!d||(!S.length&&!d.summary)){o.innerHTML=`<div style="${box};white-space:pre-wrap;font-size:12px">${esc(AI.raw)}${foot}</div>`;return}
+  const v=String(d.verdict||""),V=/نکن/.test(v)?["ورود نکن","#3A1A1A","#ef5b5b","#F5A3A3"]:/صبر/.test(v)?["صبر کن","#33290F","#e0b84c","#f1d98a"]:["قابل بررسی برای ورود","#12392B","#35c28a","#8FE6BF"];
+  const n=Math.max(1,Math.min(5,Math.round(+d.risk)||3)),rc=n<=2?"#35c28a":n===3?"#e0b84c":"#ef5b5b";
+  const meter=[0,1,2,3,4].map(i=>`<i style="display:inline-block;width:14px;height:6px;border-radius:3px;margin-inline-start:3px;background:${i<n?rc:"var(--ln)"}"></i>`).join("");
+  o.innerHTML=`<div style="${box}"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><span style="padding:5px 12px;border-radius:10px;border:2px solid ${V[2]};background:${V[1]};color:${V[3]};font-weight:700;font-size:13px">${V[0]}</span><span style="font-size:11px;color:var(--mu)">ریسک ${meter}</span></div>
+  ${d.summary?`<p style="margin:8px 0 0;font-size:13px">${esc(d.summary)}</p>`:""}
+  ${S.map(([t,c,m,arr])=>`<div style="border:1px solid var(--ln);border-inline-start:3px solid ${c};border-radius:10px;padding:8px 10px;margin-top:8px"><div style="font-size:12px;color:${c};font-weight:700;margin-bottom:4px">${t}</div>${arr.slice(0,5).map(x=>`<div style="display:flex;gap:6px;font-size:12px;line-height:1.6"><span style="color:${c}">${m}</span><span>${esc(x)}</span></div>`).join("")}</div>`).join("")}${foot}</div>`;
 }
 
 function render(sym,tf,a){
@@ -350,7 +372,7 @@ function render(sym,tf,a){
   $("nm").textContent=sym+" · "+tf;
   a.sig=d?{pl:a.pl,z:b.z,i:a.c.length-1,d}:L?{pl:L.pl,z:{...L.z,i:L.z.i+L.off},i:L.i,d:L.d,f:L.f,x:L.x,s:L.s,hist:1}:0;
   if(VW.key!==sym+tf){VW.N=0;VW.off=0;VW.key=sym+tf}
-  LA=a;draw(a);bindZoom($("cv"));LT=signalText(a,sym,tf);bindAI();
+  LA=a;draw(a);bindZoom($("cv"));LT=signalText(a,sym,tf);LTJ=LT.slice(0,LT.lastIndexOf("\n\n"))+JSONINSTR;LKEY=sym+tf;bindAI();showAI();
 }
 
 let ws=null,timer=null,liveKey="",LA=null;
