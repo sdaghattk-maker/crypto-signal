@@ -373,7 +373,7 @@ function showAI(){
   ${S.map(([t,c,m,arr])=>`<div style="border:1px solid var(--ln);border-inline-start:3px solid ${c};border-radius:10px;padding:8px 10px;margin-top:8px"><div style="font-size:12px;color:${c};font-weight:700;margin-bottom:4px">${t}</div>${arr.slice(0,5).map(x=>`<div style="display:flex;gap:6px;font-size:12px;line-height:1.6"><span style="color:${c}">${m}</span><span>${esc(x)}</span></div>`).join("")}</div>`).join("")}${foot}</div>`;
 }
 
-const NET={ws:"off",lastMsg:0,rest:"idle",lastRest:0,err:""};
+const NET={ws:"off",lastMsg:0,rest:"idle",lastRest:0,err:"",host:"",t0:0};
 function paintNet(){
   const b=$("net");if(!b)return;
   const live=$("live").checked,now=Date.now(),ag=s=>s<60?s+"ث":Math.floor(s/60)+"د";
@@ -382,15 +382,16 @@ function paintNet(){
   else if(NET.rest==="loading"){s="wait";txt="دریافت داده…"}
   else if(NET.rest==="err"){s="bad";txt="قطع"}
   else if(live){
-    if(NET.ws==="open"&&now-NET.lastMsg<15000){s="ok";txt="زنده"}
-    else if(NET.ws==="connecting"||NET.ws==="open"){s="wait";txt="در حال اتصال"}
+    if(NET.ws==="open"){s=now-NET.lastMsg<30000?"ok":"wait";txt=s==="ok"?"زنده":"متصل؛ بدون قیمت"}
+    else if(NET.ws==="connecting"&&now-NET.t0<8000){s="wait";txt="در حال اتصال"}
+    else if(NET.rest==="ok"){s="wait";txt="فقط دوره‌ای"}
     else{s="bad";txt="قطع زنده"}}
   else if(NET.rest==="ok"){s="idle";txt="غیرزنده · "+ag(Math.round((now-NET.lastRest)/1000))}
   else{s="idle";txt="آماده"}
   b.dataset.s=s;$("nt").textContent=txt;
   const d=$("nd");if(d&&!d.hidden){
     const R={idle:"—",loading:"در حال دریافت",ok:"موفق",err:"خطا"}[NET.rest],W={off:"خاموش",connecting:"در حال اتصال",open:"متصل",closed:"قطع"}[NET.ws];
-    d.innerHTML=`داده تاریخی: ${R}${NET.lastRest?" · "+new Date(NET.lastRest).toLocaleTimeString():""}<br>قیمت زنده: ${W}${NET.lastMsg?" · "+Math.round((now-NET.lastMsg)/1000)+" ثانیه پیش":""}${NET.err?`<br><span style="color:var(--dn)">${esc(NET.err)}</span>`:""}`}
+    d.innerHTML=`داده تاریخی: ${R}${NET.lastRest?" · "+new Date(NET.lastRest).toLocaleTimeString():""}<br>قیمت زنده: ${W}${NET.host&&NET.ws!=="off"?" ("+NET.host+")":""}${NET.lastMsg?" · "+Math.round((now-NET.lastMsg)/1000)+" ثانیه پیش":""}${live&&NET.ws!=="open"&&NET.rest==="ok"?`<br><span style="color:var(--ac)">قیمت زنده وصل نیست؛ فقط تحلیل هر ${["1m","5m"].includes($("tf").value)?30:60} ثانیه تازه می‌شود.</span>`:""}${NET.err?`<br><span style="color:var(--dn)">${esc(NET.err)}</span>`:""}`}
 }
 let CLK={o:0,ms:0},ticked=0;
 function tick(){
@@ -453,14 +454,21 @@ function render(sym,tf,a){
   if(typeof scrollTo==="function"){scrollTo(0,sy);(typeof requestAnimationFrame==="function"?requestAnimationFrame:f=>f())(()=>{oe.style.minHeight="";scrollTo(0,sy)})}
 }
 
-let ws=null,timer=null,liveKey="",LA=null;
-function stopLive(){liveKey="";NET.ws="off";if(ws){ws.onclose=null;ws.close();ws=null}clearInterval(timer)}
+let ws=null,timer=null,liveKey="",LA=null,liveTok=0;
+function stopLive(){liveKey="";liveTok++;NET.ws="off";if(ws){ws.onclose=null;ws.close();ws=null}clearInterval(timer)}
+const WSH=["wss://stream.binance.com:9443","wss://stream.binance.com:443","wss://data-stream.binance.vision"];
 function startLive(sym,tf){
-  stopLive();const key=liveKey=sym+tf;let last=0;
+  stopLive();const key=liveKey=sym+tf,my=++liveTok;let last=0,wi=0;
   const open=()=>{
-    NET.ws="connecting";try{ws=new WebSocket(`wss://stream.binance.com:9443/ws/${sym.toLowerCase()}@miniTicker`);
-      ws.onmessage=m=>{NET.lastMsg=Date.now();NET.ws="open";const v=+JSON.parse(m.data).c,el=$("px");if(!el||!v)return;el.textContent=fmt(v);el.style.color=v>=last?"var(--up)":"var(--dn)";last=v};
-      ws.onerror=()=>{NET.ws="closed"};ws.onclose=()=>{NET.ws="closed";if(liveKey===key)setTimeout(open,3000)}}catch(e){}};
+    if(liveTok!==my)return;
+    const h=WSH[wi%WSH.length];NET.ws="connecting";NET.host=h.replace("wss://","");NET.t0=Date.now();
+    try{const me=ws=new WebSocket(`${h}/ws/${sym.toLowerCase()}@miniTicker`);let good=0;
+      const to=setTimeout(()=>{if(!good){me.onclose=null;try{me.close()}catch(e){}wi++;open()}},6000);
+      me.onopen=()=>{good=1;clearTimeout(to);NET.ws="open"};
+      me.onmessage=m=>{NET.lastMsg=Date.now();NET.ws="open";const v=+JSON.parse(m.data).c,el=$("px");if(!el||!v)return;el.textContent=fmt(v);el.style.color=v>=last?"var(--up)":"var(--dn)";last=v};
+      me.onerror=()=>{NET.ws="closed"};
+      me.onclose=()=>{clearTimeout(to);NET.ws="closed";if(!good)wi++;if(liveTok===my)setTimeout(open,2000)}}
+    catch(e){wi++;setTimeout(open,2000)}};
   open();
   timer=setInterval(()=>run(true),tf==="1m"||tf==="5m"?30000:60000);
 }
