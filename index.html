@@ -3,6 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src https: wss:; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
 <title>سیگنال کریپتو</title>
 <style>
 :root{--bg:#10151c;--sf:#18202b;--tx:#e8edf3;--mu:#8795a6;--up:#35c28a;--dn:#ef5b5b;--ac:#e0b84c;--ln:#27323f;color-scheme:dark}
@@ -72,35 +74,21 @@ const $=id=>document.getElementById(id);
 const HOSTS=["https://api.binance.com","https://data-api.binance.vision"];
 const TFMS={"1m":6e4,"5m":3e5,"15m":9e5,"1h":36e5,"4h":144e5,"1d":864e5};
 const HTF={"1m":"5m","5m":"15m","15m":"1h","1h":"4h","4h":"1d","1d":"1w"};
-const fmt=v=>v>=100?v.toFixed(2):v>=1?v.toFixed(4):v.toFixed(8);
-const ema=(a,p)=>{const k=2/(p+1);let e=a[0];return a.map((v,i)=>i?e=v*k+e*(1-k):e)};
-const avg=a=>a.reduce((x,y)=>x+y,0)/a.length;
+const fmt=v=>!Number.isFinite(v)?"—":v>=100?v.toFixed(2):v>=1?v.toFixed(4):v.toFixed(8);
 const P=k=>({o:k.map(x=>+x[1]),h:k.map(x=>+x[2]),l:k.map(x=>+x[3]),c:k.map(x=>+x[4]),v:k.map(x=>+x[5]),t:k.map(x=>+x[0])});
 
-function rsiS(c,p=14){const o=Array(c.length).fill(50);let g=0,s=0;
-  for(let i=1;i<=p;i++){const d=c[i]-c[i-1];d>0?g+=d:s-=d}g/=p;s/=p;
-  for(let i=p+1;i<c.length;i++){const d=c[i]-c[i-1];g=(g*(p-1)+Math.max(d,0))/p;s=(s*(p-1)+Math.max(-d,0))/p;o[i]=100-100/(1+g/(s||1e-9))}return o}
 function atrS(h,l,c,p=14){const o=Array(c.length).fill(0),t=[0];
   for(let i=1;i<c.length;i++)t.push(Math.max(h[i]-l[i],Math.abs(h[i]-c[i-1]),Math.abs(l[i]-c[i-1])));
   let a=0;for(let i=1;i<=p;i++)a+=t[i]/p;o[p]=a;for(let i=p+1;i<c.length;i++){a=(a*(p-1)+t[i])/p;o[i]=a}return o}
-function adxS(h,l,c,p=14){const o=Array(c.length).fill(0);let tr=0,pd=0,md=0,ax=0;
-  for(let i=1;i<c.length;i++){
-    const up=h[i]-h[i-1],dn=l[i-1]-l[i],t=Math.max(h[i]-l[i],Math.abs(h[i]-c[i-1]),Math.abs(l[i]-c[i-1]));
-    const A=up>dn&&up>0?up:0,B=dn>up&&dn>0?dn:0;
-    if(i<=p){tr+=t;pd+=A;md+=B}else{tr+=t-tr/p;pd+=A-pd/p;md+=B-md/p}
-    if(i>=p){const a=100*pd/tr,b=100*md/tr,dx=100*Math.abs(a-b)/((a+b)||1);ax=i===p?dx:(ax*(p-1)+dx)/p;o[i]=ax}
-  }return o}
-function swings(h,l,k=3){const H=[],L=[];
-  for(let i=k;i<h.length-k;i++){let a=1,b=1;
-    for(let j=1;j<=k;j++){if(h[i]<=h[i-j]||h[i]<=h[i+j])a=0;if(l[i]>=l[i-j]||l[i]>=l[i+j])b=0}
-    if(a)H.push(h[i]);if(b)L.push(l[i])}return{H,L}}
-
 async function load(sym,tf,lim,end){
   let err;
   for(const h of HOSTS){
-    try{const r=await fetch(`${h}/api/v3/klines?symbol=${sym}&interval=${tf}&limit=${lim||1000}${end?"&endTime="+end:""}`);
+    const ac=new AbortController(),to=setTimeout(()=>ac.abort(),15000);
+    try{const r=await fetch(`${h}/api/v3/klines?symbol=${encodeURIComponent(sym)}&interval=${tf}&limit=${lim||1000}${end?"&endTime="+end:""}`,{signal:ac.signal});
       if(!r.ok)throw new Error(r.status===400?"نماد پیدا نشد":"خطای صرافی "+r.status);
-      return await r.json()}catch(e){err=e}
+      const j=await r.json();
+      if(!Array.isArray(j)||j.some(k=>!Array.isArray(k)||k.length<6))throw new Error("پاسخ نامعتبر از صرافی");
+      return j}catch(e){err=e.name==="AbortError"?new Error("زمان دریافت تمام شد"):e}finally{clearTimeout(to)}
   }throw err;
 }
 
@@ -109,7 +97,7 @@ async function loadN(sym,tf,N,cb){
   let all=[],end=0;
   while(all.length<N){
     const need=Math.min(1000,N-all.length),page=await load(sym,tf,need,end);
-    if(!page.length)break;
+    if(!page.length||(all.length&&page[page.length-1][0]>=all[0][0]))break;
     all=page.concat(all);if(cb)cb(all.length);
     if(page.length<need)break;
     end=page[0][0]-1;
@@ -325,6 +313,7 @@ function drawInner(a){
 }
 
 let LT="",LTJ="",LKEY="",AI=null;try{AI=JSON.parse(localStorage.ai||"null")}catch(e){}
+if(!AI||typeof AI.key!=="string"||typeof AI.t!=="number"||typeof AI.p!=="number"||typeof AI.raw!=="string")AI=null;else if(AI.d&&typeof AI.d!=="object")AI.d=null;
 function signalText(a,sym,tf){
   const b=a.best,nm=v=>v>0?"صعودی":v<0?"نزولی":"نامشخص",f=fmt;
   const L=a.dir?0:a.bt.last,q=a.dir?a.pl:L?L.pl:0,z=a.dir?b.z:L?L.z:0;
@@ -347,12 +336,14 @@ function bindAI(){
     $("cp").textContent=ok?"کپی شد ✓":"کپی نشد";setTimeout(()=>{$("cp").textContent="کپی برای AI"},2000)};
   $("ai").onclick=async()=>{const u=$("wk").value.trim(),key=LKEY,price=LA.p,say=t=>{const x=$("aiout");if(x)x.textContent=t};
     if(!u){say("برای تحلیل هوشمند، آدرس Worker را در بخش بالا وارد کن. یا از «کپی برای AI» استفاده کن.");return}
+    if(!/^https:\/\//i.test(u)){say("آدرس Worker باید با https:// شروع شود.");return}
     say("در حال تحلیل…");
-    try{const r=await fetch(u,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({prompt:LTJ})}),j=await r.json();
+    const ac=new AbortController(),to=setTimeout(()=>ac.abort(),60000);
+    try{const r=await fetch(u,{method:"POST",signal:ac.signal,headers:{"Content-Type":"application/json"},body:JSON.stringify({prompt:LTJ})}),j=await r.json();
       if(!j.text){say(j.error||"پاسخی دریافت نشد");return}
       AI={key,t:Date.now(),p:price,d:parseAI(j.text),raw:j.text};
       try{localStorage.ai=JSON.stringify(AI)}catch(e){}
-      showAI()}catch(e){say("اتصال به Worker ناموفق بود: "+e.message)}};
+      showAI()}catch(e){say(e.name==="AbortError"?"Worker جواب نداد (زمان تمام شد).":"اتصال به Worker ناموفق بود: "+e.message)}finally{clearTimeout(to)}};
 }
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const JSONINSTR='\n\nبه‌عنوان تحلیلگر محتاط، فقط یک شیء JSON معتبر برگردان (بدون هیچ متن دیگر و بدون ```) با این کلیدها: {"verdict":"ورود" یا "صبر" یا "ورود نکن","risk":عدد ۱ تا ۵ (۵ پرریسک‌ترین),"summary":"یک جمله فارسی","strengths":[حداکثر ۳ مورد],"risks":[حداکثر ۴ مورد],"invalidation":[حداکثر ۳ مورد],"confirm":[حداکثر ۴ مورد]}. هر مورد حداکثر ۱۲ کلمه فارسی. پیش‌بینی قطعی نده و توصیه مالی نکن.';
@@ -437,7 +428,7 @@ function render(sym,tf,a){
   <div class="sig ${cls}"><div style="display:flex;justify-content:space-between;align-items:baseline"><span><span id="nm"></span> <span class="px" id="px">${fmt(a.p)}</span></span><small id="upd" style="color:var(--mu)"></small></div>${clk}${idx}</div>
   <div class="zb"><button id="cp">کپی برای AI</button><button id="ai">تحلیل هوشمند</button></div><div id="aiout" style="white-space:pre-wrap;font-size:12px;margin:0 0 10px"></div>
   ${tf==="1m"||tf==="5m"?'<p style="margin:0 0 10px;color:var(--ac);font-size:13px">تایم‌فریم کوتاه نویز و کارمزد زیادی دارد؛ فاصله حد ضرر را با کارمزد مقایسه کن.</p>':""}
-  <canvas id="cv"></canvas>
+  <canvas id="cv" role="img" aria-label="نمودار کندلی با ناحیه‌ها و سیگنال‌ها"></canvas>
   <div class="zb"><button id="zi" aria-label="بزرگ‌نمایی">＋</button><button id="zo" aria-label="کوچک‌نمایی">－</button><button id="zh" aria-label="بلندتر کردن نمودار">↕＋</button><button id="zs" aria-label="کوتاه‌تر کردن نمودار">↕−</button><button id="zl">آخرین ▸</button><button id="zr">بازنشانی</button></div>
   <p class="note" style="margin:6px 0 0">کندل‌ها واقعی‌اند. مستطیل‌ها OB و FVG، خط‌چین‌ها BOS/CHoCH، نقطه زرد جارو شدن نقدینگی و فلش‌ها سیگنال‌ها هستند. با دو انگشت زوم کن، با کشیدن جابه‌جا شو و با دوبار لمس بازنشانی کن.</p>${body}
   <h2>چک‌لیست همگرایی (SMC / ICT)</h2><table>${b.it.map(([pt,t,ok])=>`<tr><td class="${ok?"up":""}" style="${ok?"":"color:var(--mu)"}">${ok?"✓":"✗"} ${t}</td><td>${ok?"+"+pt:"0"}</td></tr>`).join("")}</table>
@@ -467,32 +458,39 @@ function startLive(sym,tf){
     try{const me=ws=new WebSocket(`${h}/ws/${sym.toLowerCase()}@miniTicker`);let good=0;
       const to=setTimeout(()=>{if(!good){me.onclose=null;try{me.close()}catch(e){}wi++;open()}},6000);
       me.onopen=()=>{good=1;clearTimeout(to);NET.ws="open"};
-      me.onmessage=m=>{NET.lastMsg=Date.now();NET.ws="open";const v=+JSON.parse(m.data).c,el=$("px");if(!el||!v)return;el.textContent=fmt(v);el.style.color=v>=last?"var(--up)":"var(--dn)";last=v};
+      me.onmessage=m=>{NET.lastMsg=Date.now();NET.ws="open";let v=0;try{v=+JSON.parse(m.data).c}catch(_){}const el=$("px");if(!el||!v)return;el.textContent=fmt(v);el.style.color=v>=last?"var(--up)":"var(--dn)";last=v};
       me.onerror=()=>{NET.ws="closed"};
       me.onclose=()=>{clearTimeout(to);NET.ws="closed";if(!good)wi++;if(liveTok===my)setTimeout(open,2000)}}
     catch(e){wi++;setTimeout(open,2000)}};
   open();
   timer=setInterval(()=>run(true),tf==="1m"||tf==="5m"?30000:60000);
 }
+let busy=0,RUNID=0,LS=null;
 async function run(quiet){
-  const sym=$("sym").value.trim().toUpperCase(),tf=$("tf").value;
+  if(quiet&&(busy>0||document.hidden))return;
+  let sym=$("sym").value.trim().toUpperCase(),tf=$("tf").value;
+  if(quiet&&LS){sym=LS.sym;tf=LS.tf}
   if(!sym)return;
+  if(!/^[A-Z0-9]{2,20}$/.test(sym)){const p=document.createElement("p");p.className="dn";p.textContent="نماد نامعتبر است. فقط حروف انگلیسی و عدد، مثل BTCUSDT.";$("out").replaceChildren(p);return}
+  const my=++RUNID;busy++;
   try{localStorage.cap=$("cap").value;localStorage.rk=$("rk").value}catch(e){}
   $("go").disabled=true;if(!quiet)NET.rest="loading";
   if(!quiet){$("out").style.minHeight=$("out").offsetHeight+"px";$("out").innerHTML='<p style="color:var(--mu)">در حال دریافت داده از صرافی…</p>'}
   try{
-    const cnt=+$("cnt").value,prog=m=>{if(!quiet)$("out").innerHTML='<p style="color:var(--mu)">'+m+'</p>'};
+    const cnt=+$("cnt").value,prog=m=>{if(!quiet&&my===RUNID)$("out").innerHTML='<p style="color:var(--mu)">'+m+'</p>'};
     const [K,HK]=await Promise.all([getK(sym,tf,cnt,quiet,n=>prog(`در حال دریافت داده… ${n} از ${cnt}`)),load(sym,HTF[tf],300)]);
+    if(my!==RUNID)return;
     const prev=quiet&&LA&&LKEY===sym+tf&&CK&&CK.key===sym+tf+cnt?LA:null;
-    if(!quiet&&cnt>2000){prog("در حال محاسبه بک‌تست…");await new Promise(r=>setTimeout(r,30))}
-    render(sym,tf,analyze(K,HK,prev));NET.rest="ok";NET.lastRest=Date.now();NET.err="";
+    if(!quiet&&cnt>2000){prog("در حال محاسبه بک‌تست…");await new Promise(r=>setTimeout(r,30));if(my!==RUNID)return}
+    render(sym,tf,analyze(K,HK,prev));LS={sym,tf};NET.rest="ok";NET.lastRest=Date.now();NET.err="";
     $("upd").textContent="آخرین تحلیل: "+new Date().toLocaleTimeString();
     if($("live").checked){if(liveKey!==sym+tf)startLive(sym,tf)}else stopLive();
   }catch(e){
-    NET.rest="err";NET.err=e.message;if(quiet&&$("upd"))$("upd").textContent="به‌روزرسانی ناموفق بود؛ دوباره تلاش می‌شود";
-    else{const p=document.createElement("p");p.className="dn";p.textContent="دریافت داده ناموفق بود: "+e.message+". نماد را به شکل BTCUSDT بنویس و اینترنت (یا VPN) را بررسی کن.";$("out").replaceChildren(p);$("out").style.minHeight=""}
-  }
-  $("go").disabled=false;
+    if(my!==RUNID)return;
+    $("out").style.minHeight="";NET.rest="err";NET.err=e.message;
+    if(quiet&&$("upd"))$("upd").textContent="به‌روزرسانی ناموفق بود؛ دوباره تلاش می‌شود";
+    else{const p=document.createElement("p");p.className="dn";p.textContent="دریافت داده ناموفق بود: "+e.message+". نماد را به شکل BTCUSDT بنویس و اینترنت (یا VPN) را بررسی کن.";$("out").replaceChildren(p)}
+  }finally{busy--;if(my===RUNID)$("go").disabled=false}
 }
 try{$("cap").value=localStorage.cap||1000;$("rk").value=localStorage.rk||1}catch(e){$("cap").value=1000;$("rk").value=1}
 try{$("wk").value=localStorage.wk||""}catch(e){}
@@ -506,6 +504,7 @@ paintNet();
 $("wk").addEventListener("change",()=>{try{localStorage.wk=$("wk").value.trim()}catch(e){}});
 $("vis").addEventListener("change",()=>{VW.N=0;VW.off=0;redraw()});
 $("cnt").addEventListener("change",()=>{if(LA)run()});
+document.addEventListener("visibilitychange",()=>{if(!document.hidden&&$("live").checked&&LA)run(true)});
 $("live").addEventListener("change",()=>{$("live").checked?run(true):stopLive()});
 $("sym").addEventListener("keydown",e=>{if(e.key==="Enter")run()});
 </script>
